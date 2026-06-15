@@ -1,4 +1,4 @@
-# Shuffle 🎵
+# Shuffle Mobile App
 
 A Spotify-inspired music streaming app built with React Native + Expo.  
 Streams full-length, royalty-free tracks from the [Audius](https://audius.co) decentralised music platform — **no API key required**.
@@ -134,9 +134,3 @@ No authentication or API key is required.
 4. Add new API calls to `src/api/audius.ts`.
 5. Use the tokens in `src/theme/index.ts` for all colours and spacing.
 6. Open a PR against `main` when your screen is ready.
-
----
-
-## Team
-
-Group assignment — 9 members. App name: **Shuffle**.

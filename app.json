@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "spotify-clone",
-    "slug": "spotify-clone",
+    "name": "Shuffle",
+    "slug": "shuffle",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": true
     },
