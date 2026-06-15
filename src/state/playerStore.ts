@@ -1,12 +1,27 @@
-import { Audio, AVPlaybackStatus } from 'expo-av';
+import { createAudioPlayer, setAudioModeAsync, AudioPlayer } from 'expo-audio';
 import { create } from 'zustand';
 import { Track, RepeatMode } from '../types';
 
-Audio.setAudioModeAsync({
-  staysActiveInBackground: true,
-  playsInSilentModeIOS: true,
-  shouldDuckAndroid: true,
+setAudioModeAsync({
+  playsInSilentMode: true,
+  interruptionMode: 'duckOthers',
+  shouldPlayInBackground: true,
 });
+
+// Follow Audius redirect chain to get the final CDN URL so iOS AVPlayer
+// doesn't choke on intermediate content-node domains it can't resolve.
+async function resolveUrl(url: string): Promise<string> {
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { Range: 'bytes=0-0' },
+      redirect: 'follow',
+    });
+    return res.url || url;
+  } catch {
+    return url;
+  }
+}
 
 interface PlayerState {
   currentTrack: Track | null;
@@ -30,8 +45,8 @@ interface PlayerState {
   toggleLike: (id: string) => void;
   isLiked: (id: string) => boolean;
 
-  _sound: Audio.Sound | null;
-  _onPlaybackUpdate: (status: AVPlaybackStatus) => void;
+  _player: AudioPlayer | null;
+  _pollInterval: ReturnType<typeof setInterval> | null;
 }
 
 export const usePlayerStore = create<PlayerState>((set, get) => ({
@@ -45,28 +60,14 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   repeat: 'off',
   isShuffle: false,
   likedIds: new Set(),
-  _sound: null,
-
-  _onPlaybackUpdate(status: AVPlaybackStatus) {
-    if (!status.isLoaded) return;
-    set({
-      isPlaying: status.isPlaying,
-      positionMs: status.positionMillis,
-      durationMs: status.durationMillis ?? 0,
-    });
-    if (status.didJustFinish) {
-      const { repeat } = get();
-      if (repeat === 'one') {
-        get()._sound?.replayAsync();
-      } else {
-        get().skipNext();
-      }
-    }
-  },
+  _player: null,
+  _pollInterval: null,
 
   async playTrack(track, queue) {
-    const { _sound, _onPlaybackUpdate } = get();
-    if (_sound) await _sound.unloadAsync();
+    const { _player, _pollInterval } = get();
+
+    if (_pollInterval) clearInterval(_pollInterval);
+    if (_player) _player.remove();
 
     set({ currentTrack: track, isLoading: true, positionMs: 0 });
     if (queue) {
@@ -75,12 +76,30 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
 
     try {
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: track.streamUrl },
-        { shouldPlay: true },
-        get()._onPlaybackUpdate
-      );
-      set({ _sound: sound, isLoading: false, isPlaying: true });
+      const resolvedUrl = await resolveUrl(track.streamUrl);
+      const player = createAudioPlayer({ uri: resolvedUrl });
+
+      // Poll position + duration every 500ms
+      const interval = setInterval(() => {
+        const p = get()._player;
+        if (!p) return;
+        const posMs = Math.floor((p.currentTime ?? 0) * 1000);
+        const durMs = Math.floor((p.duration ?? 0) * 1000);
+        set({ positionMs: posMs, durationMs: durMs, isPlaying: p.playing });
+
+        // Auto-advance when finished
+        if (durMs > 0 && posMs >= durMs - 500) {
+          const { repeat } = get();
+          if (repeat === 'one') {
+            p.seekTo(0);
+          } else {
+            get().skipNext();
+          }
+        }
+      }, 500);
+
+      player.play();
+      set({ _player: player, _pollInterval: interval, isLoading: false, isPlaying: true });
     } catch (e) {
       set({ isLoading: false });
       console.error('playTrack error:', e);
@@ -88,15 +107,20 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   async togglePlay() {
-    const { _sound, isPlaying } = get();
-    if (!_sound) return;
-    if (isPlaying) await _sound.pauseAsync();
-    else await _sound.playAsync();
+    const { _player, isPlaying } = get();
+    if (!_player) return;
+    if (isPlaying) {
+      _player.pause();
+      set({ isPlaying: false });
+    } else {
+      _player.play();
+      set({ isPlaying: true });
+    }
   },
 
   async seekTo(ms) {
-    const { _sound } = get();
-    if (_sound) await _sound.setPositionAsync(ms);
+    const { _player } = get();
+    if (_player) _player.seekTo(ms / 1000);
   },
 
   async skipNext() {

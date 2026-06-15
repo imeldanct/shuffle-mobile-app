@@ -1,31 +1,35 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import React from 'react';
 import { ActivityIndicator, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { usePlayerStore } from '../state/playerStore';
 import { Colors, FontSize, Spacing } from '../theme';
+import { RootStackParamList } from '../navigation/types';
 
-interface Props {
-  onPress: () => void;
-}
+type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-export default function MiniPlayer({ onPress }: Props) {
+export default function MiniPlayer() {
+  const navigation = useNavigation<Nav>();
   const { currentTrack, isPlaying, isLoading, togglePlay } = usePlayerStore();
 
   if (!currentTrack) return null;
 
   return (
-    <TouchableOpacity style={styles.container} onPress={onPress} activeOpacity={0.9}>
+    <TouchableOpacity
+      style={styles.container}
+      onPress={() => navigation.navigate('NowPlaying')}
+      activeOpacity={0.9}
+    >
       {currentTrack.artworkUrl ? (
         <Image source={{ uri: currentTrack.artworkUrl }} style={styles.artwork} />
       ) : (
         <View style={[styles.artwork, styles.artworkFallback]} />
       )}
-      <Text style={styles.title} numberOfLines={1}>
-        {currentTrack.title}
-      </Text>
-      <Text style={styles.artist} numberOfLines={1}>
-        {currentTrack.artist}
-      </Text>
+      <View style={styles.info}>
+        <Text style={styles.title} numberOfLines={1}>{currentTrack.title}</Text>
+        <Text style={styles.artist} numberOfLines={1}>{currentTrack.artist}</Text>
+      </View>
       <TouchableOpacity
         style={styles.btn}
         onPress={(e) => { e.stopPropagation(); togglePlay(); }}
@@ -36,6 +40,13 @@ export default function MiniPlayer({ onPress }: Props) {
         ) : (
           <Ionicons name={isPlaying ? 'pause' : 'play'} size={24} color={Colors.text} />
         )}
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={styles.btn}
+        onPress={(e) => { e.stopPropagation(); }}
+        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+      >
+        <Ionicons name="play-skip-forward" size={22} color={Colors.text} />
       </TouchableOpacity>
     </TouchableOpacity>
   );
@@ -61,8 +72,10 @@ const styles = StyleSheet.create({
   artworkFallback: {
     backgroundColor: Colors.surface,
   },
-  title: {
+  info: {
     flex: 1,
+  },
+  title: {
     color: Colors.text,
     fontSize: FontSize.sm,
     fontWeight: '600',
@@ -70,7 +83,7 @@ const styles = StyleSheet.create({
   artist: {
     color: Colors.textSecondary,
     fontSize: FontSize.xs,
-    marginRight: Spacing.sm,
+    marginTop: 2,
   },
   btn: {
     width: 32,

@@ -1,35 +1,44 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import React, { useState } from 'react';
 import {
   Alert,
   FlatList,
   Modal,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePlayerStore } from '../state/playerStore';
 import { Colors, BorderRadius, FontSize, Spacing } from '../theme';
 import { Playlist } from '../types';
+import { RootStackParamList } from '../navigation/types';
 
-// Simple local playlist store (no persistence for MVP — can add AsyncStorage later)
+type Nav = NativeStackNavigationProp<RootStackParamList>;
+
+type FilterType = 'Playlists' | 'Albums' | 'Artists';
+const FILTERS: FilterType[] = ['Playlists', 'Albums', 'Artists'];
+
 let nextId = 1;
 
 export default function LibraryScreen() {
-  const { likedIds, queue, currentTrack } = usePlayerStore();
+  const navigation = useNavigation<Nav>();
+  const likedIds = usePlayerStore((s) => s.likedIds);
+  const [filter, setFilter] = useState<FilterType>('Playlists');
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [newName, setNewName] = useState('');
+  const insets = useSafeAreaInsets();
 
   const createPlaylist = () => {
     const name = newName.trim();
     if (!name) return;
-    setPlaylists((prev) => [
-      ...prev,
-      { id: String(nextId++), name, trackIds: [], createdAt: Date.now() },
-    ]);
+    setPlaylists((prev) => [...prev, { id: String(nextId++), name, trackIds: [], createdAt: Date.now() }]);
     setNewName('');
     setModalVisible(false);
   };
@@ -37,65 +46,75 @@ export default function LibraryScreen() {
   const deletePlaylist = (id: string) => {
     Alert.alert('Delete playlist', 'Are you sure?', [
       { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => setPlaylists((prev) => prev.filter((p) => p.id !== id)),
-      },
+      { text: 'Delete', style: 'destructive', onPress: () => setPlaylists((p) => p.filter((x) => x.id !== id)) },
     ]);
   };
 
-  const likedCount = likedIds.size;
-
   return (
-    <View style={styles.container}>
-      <Text style={styles.heading}>Your Library</Text>
-
-      {/* Liked Songs */}
-      <View style={styles.likedRow}>
-        <View style={styles.likedIcon}>
-          <Ionicons name="heart" size={24} color={Colors.primary} />
-        </View>
-        <View style={styles.likedInfo}>
-          <Text style={styles.likedTitle}>Liked Songs</Text>
-          <Text style={styles.likedCount}>{likedCount} song{likedCount !== 1 ? 's' : ''}</Text>
-        </View>
-      </View>
-
-      <View style={styles.divider} />
-
-      {/* Playlists */}
-      <View style={styles.playlistHeader}>
-        <Text style={styles.subheading}>Playlists</Text>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.heading}>Your Library</Text>
         <TouchableOpacity onPress={() => setModalVisible(true)}>
-          <Ionicons name="add-circle-outline" size={26} color={Colors.primary} />
+          <Ionicons name="add" size={28} color={Colors.text} />
         </TouchableOpacity>
       </View>
 
-      <FlatList
-        data={playlists}
-        keyExtractor={(p) => p.id}
-        renderItem={({ item }) => (
+      {/* Filter pills */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
+        {FILTERS.map((f) => (
           <TouchableOpacity
-            style={styles.playlistRow}
-            onLongPress={() => deletePlaylist(item.id)}
-            activeOpacity={0.7}
+            key={f}
+            style={[styles.pill, filter === f && styles.pillActive]}
+            onPress={() => setFilter(f)}
           >
-            <View style={styles.playlistIcon}>
-              <Ionicons name="musical-notes" size={22} color={Colors.textSecondary} />
-            </View>
-            <View style={styles.playlistInfo}>
-              <Text style={styles.playlistName}>{item.name}</Text>
-              <Text style={styles.playlistCount}>
-                {item.trackIds.length} song{item.trackIds.length !== 1 ? 's' : ''}
-              </Text>
-            </View>
+            <Text style={[styles.pillText, filter === f && styles.pillTextActive]}>{f}</Text>
           </TouchableOpacity>
-        )}
-        ListEmptyComponent={
-          <Text style={styles.empty}>No playlists yet. Tap + to create one.</Text>
-        }
-      />
+        ))}
+      </ScrollView>
+
+      {/* Content */}
+      {filter === 'Playlists' && (
+        <FlatList
+          data={playlists}
+          keyExtractor={(p) => p.id}
+          ListHeaderComponent={
+            <TouchableOpacity style={styles.likedRow} onPress={() => navigation.navigate('LikedSongs')}>
+              <View style={styles.likedIcon}>
+                <Ionicons name="heart" size={22} color={Colors.text} />
+              </View>
+              <View>
+                <Text style={styles.itemName}>Liked Songs</Text>
+                <Text style={styles.itemSub}>{likedIds.size} songs</Text>
+              </View>
+            </TouchableOpacity>
+          }
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={styles.itemRow}
+              onLongPress={() => deletePlaylist(item.id)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.playlistIcon}>
+                <Ionicons name="musical-notes" size={20} color={Colors.textSecondary} />
+              </View>
+              <View>
+                <Text style={styles.itemName}>{item.name}</Text>
+                <Text style={styles.itemSub}>Playlist · {item.trackIds.length} songs</Text>
+              </View>
+            </TouchableOpacity>
+          )}
+          ListEmptyComponent={
+            <Text style={styles.empty}>Create a playlist to get started.</Text>
+          }
+        />
+      )}
+
+      {filter !== 'Playlists' && (
+        <View style={styles.center}>
+          <Text style={styles.empty}>No {filter.toLowerCase()} saved yet.</Text>
+        </View>
+      )}
 
       {/* Create playlist modal */}
       <Modal visible={modalVisible} transparent animationType="fade">
@@ -104,7 +123,7 @@ export default function LibraryScreen() {
             <Text style={styles.modalTitle}>New Playlist</Text>
             <TextInput
               style={styles.modalInput}
-              placeholder="Playlist name"
+              placeholder="Give your playlist a name"
               placeholderTextColor={Colors.textMuted}
               value={newName}
               onChangeText={setNewName}
@@ -127,76 +146,60 @@ export default function LibraryScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  heading: {
-    color: Colors.text,
-    fontSize: FontSize.xxl,
-    fontWeight: '700',
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingHorizontal: Spacing.md,
-    paddingTop: Spacing.lg,
-    paddingBottom: Spacing.md,
+    paddingVertical: Spacing.sm,
   },
+  heading: { color: Colors.text, fontSize: FontSize.xl, fontWeight: '700' },
+  filters: { paddingHorizontal: Spacing.md, gap: Spacing.sm, paddingBottom: Spacing.md },
+  pill: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.full,
+    backgroundColor: Colors.surfaceHighlight,
+  },
+  pillActive: { backgroundColor: Colors.text },
+  pillText: { color: Colors.textSecondary, fontSize: FontSize.sm, fontWeight: '500' },
+  pillTextActive: { color: Colors.background },
   likedRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
+    gap: Spacing.md,
   },
   likedIcon: {
     width: 52,
     height: 52,
-    borderRadius: 4,
-    backgroundColor: '#2d0e4d',
+    borderRadius: BorderRadius.sm,
+    backgroundColor: '#4b0082',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  likedInfo: { marginLeft: Spacing.md },
-  likedTitle: { color: Colors.text, fontSize: FontSize.md, fontWeight: '600' },
-  likedCount: { color: Colors.textSecondary, fontSize: FontSize.sm, marginTop: 2 },
-  divider: { height: 1, backgroundColor: Colors.border, marginVertical: Spacing.md },
-  playlistHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.md,
-    marginBottom: Spacing.sm,
-  },
-  subheading: { color: Colors.text, fontSize: FontSize.lg, fontWeight: '700' },
-  playlistRow: {
+  itemRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
+    gap: Spacing.md,
   },
   playlistIcon: {
     width: 52,
     height: 52,
-    borderRadius: 4,
+    borderRadius: BorderRadius.sm,
     backgroundColor: Colors.surfaceHighlight,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  playlistInfo: { marginLeft: Spacing.md },
-  playlistName: { color: Colors.text, fontSize: FontSize.md, fontWeight: '500' },
-  playlistCount: { color: Colors.textSecondary, fontSize: FontSize.sm, marginTop: 2 },
-  empty: {
-    color: Colors.textMuted,
-    fontSize: FontSize.sm,
-    textAlign: 'center',
-    marginTop: Spacing.xl,
-    paddingHorizontal: Spacing.xl,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: Colors.overlay,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalBox: {
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.xl,
-    width: '80%',
-  },
+  itemName: { color: Colors.text, fontSize: FontSize.md, fontWeight: '500' },
+  itemSub: { color: Colors.textSecondary, fontSize: FontSize.sm, marginTop: 2 },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  empty: { color: Colors.textMuted, fontSize: FontSize.sm, textAlign: 'center', marginTop: Spacing.xl, paddingHorizontal: Spacing.xl },
+  modalOverlay: { flex: 1, backgroundColor: Colors.overlay, justifyContent: 'center', alignItems: 'center' },
+  modalBox: { backgroundColor: Colors.surface, borderRadius: BorderRadius.lg, padding: Spacing.xl, width: '80%' },
   modalTitle: { color: Colors.text, fontSize: FontSize.lg, fontWeight: '700', marginBottom: Spacing.md },
   modalInput: {
     backgroundColor: Colors.surfaceHighlight,
