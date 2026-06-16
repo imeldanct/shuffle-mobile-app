@@ -1,8 +1,8 @@
+import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -68,32 +68,39 @@ export default function SearchScreen() {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {/* Search bar */}
       <View style={styles.inputWrap}>
-        <TextInput
-          style={styles.input}
-          placeholder="What do you want to listen to?"
-          placeholderTextColor={Colors.textMuted}
-          value={query}
-          onChangeText={handleChange}
-          autoCapitalize="none"
-          returnKeyType="search"
-          clearButtonMode="while-editing"
-        />
+        <View style={styles.searchBar}>
+          <Ionicons name="search" size={20} color={Colors.textMuted} />
+          <TextInput
+            style={styles.input}
+            placeholder="What do you want to listen to?"
+            placeholderTextColor={Colors.textMuted}
+            value={query}
+            onChangeText={handleChange}
+            autoCapitalize="none"
+            returnKeyType="search"
+            clearButtonMode="while-editing"
+          />
+        </View>
       </View>
 
       {/* Browse grid — shown when not searching */}
       {!active && (
         <ScrollView contentContainerStyle={styles.grid}>
-          <Text style={styles.browseTitle}>Browse categories</Text>
+          <Text style={styles.browseTitle}>Browse all</Text>
           <View style={styles.genreGrid}>
-            {GENRES.map((g) => (
-              <TouchableOpacity
-                key={g.label}
-                style={[styles.genreCard, { backgroundColor: g.color }]}
-                onPress={() => handleGenre(g.label)}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.genreLabel}>{g.label}</Text>
-              </TouchableOpacity>
+            {Array.from({ length: Math.ceil(GENRES.length / 2) }, (_, i) => (
+              <View key={i} style={styles.genreRow}>
+                {GENRES.slice(i * 2, i * 2 + 2).map((g) => (
+                  <TouchableOpacity
+                    key={g.label}
+                    style={[styles.genreCard, { backgroundColor: g.color }]}
+                    onPress={() => handleGenre(g.label)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.genreLabel}>{g.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             ))}
           </View>
         </ScrollView>
@@ -130,11 +137,17 @@ export default function SearchScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   inputWrap: { paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm },
-  input: {
-    backgroundColor: Colors.text,
-    color: Colors.background,
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.surfaceHighlight,
     borderRadius: BorderRadius.full,
     paddingHorizontal: Spacing.md,
+    gap: Spacing.sm,
+  },
+  input: {
+    flex: 1,
+    color: Colors.text,
     paddingVertical: 10,
     fontSize: FontSize.md,
     fontWeight: '500',
@@ -149,13 +162,15 @@ const styles = StyleSheet.create({
   },
   grid: { paddingBottom: Spacing.xxl },
   genreGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
     paddingHorizontal: Spacing.md,
     gap: Spacing.sm,
   },
+  genreRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
   genreCard: {
-    width: '47%',
+    flex: 1,
     height: 96,
     borderRadius: BorderRadius.md,
     justifyContent: 'flex-end',

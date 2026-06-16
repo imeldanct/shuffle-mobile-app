@@ -1,4 +1,3 @@
-import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -21,13 +20,7 @@ import { Track } from '../types';
 import { RootStackParamList } from '../navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
-
-function greeting(): string {
-  const h = new Date().getHours();
-  if (h < 12) return 'Good morning';
-  if (h < 18) return 'Good afternoon';
-  return 'Good evening';
-}
+type Filter = 'All' | 'Music' | 'Podcasts';
 
 function TrackCard({ track, onPress }: { track: Track; onPress: () => void }) {
   return (
@@ -61,7 +54,8 @@ export default function HomeScreen() {
   const [trending, setTrending] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const { playTrack, currentTrack } = usePlayerStore();
+  const [activeFilter, setActiveFilter] = useState<Filter>('All');
+  const { playTrack } = usePlayerStore();
   const insets = useSafeAreaInsets();
 
   const load = useCallback(async () => {
@@ -103,18 +97,32 @@ export default function HomeScreen() {
     >
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + Spacing.sm }]}>
-        <Text style={styles.greeting}>{greeting()}</Text>
         <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
           <View style={styles.avatar}>
-            <Ionicons name="person" size={18} color={Colors.background} />
+            <Text style={styles.avatarLetter}>A</Text>
           </View>
         </TouchableOpacity>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pillsRow}>
+          {(['All', 'Music', 'Podcasts'] as const).map((f) => (
+            <TouchableOpacity
+              key={f}
+              style={[styles.pill, activeFilter === f && styles.pillActive]}
+              onPress={() => setActiveFilter(f)}
+            >
+              <Text style={[styles.pillText, activeFilter === f && styles.pillTextActive]}>{f}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
       </View>
 
-      {/* Recently played chips */}
+      {/* Recently played chips — two per row, each flex: 1 so they fill evenly */}
       <View style={styles.chipGrid}>
-        {recentChips.map((t) => (
-          <RecentChip key={t.id} track={t} onPress={() => play(t)} />
+        {Array.from({ length: Math.ceil(recentChips.length / 2) }, (_, i) => (
+          <View key={i} style={styles.chipRow}>
+            {recentChips.slice(i * 2, i * 2 + 2).map((t) => (
+              <RecentChip key={t.id} track={t} onPress={() => play(t)} />
+            ))}
+          </View>
         ))}
       </View>
 
@@ -171,12 +179,11 @@ const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: Spacing.md,
     paddingBottom: Spacing.md,
+    gap: Spacing.sm,
   },
-  greeting: { color: Colors.text, fontSize: FontSize.xl, fontWeight: '700' },
   avatar: {
     width: 34,
     height: 34,
@@ -185,20 +192,33 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  avatarLetter: { color: Colors.background, fontSize: FontSize.md, fontWeight: '700' },
+  pillsRow: { gap: Spacing.sm, paddingLeft: Spacing.xs },
+  pill: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: BorderRadius.full,
+    backgroundColor: Colors.surfaceHighlight,
+  },
+  pillActive: { backgroundColor: Colors.primary },
+  pillText: { color: Colors.text, fontSize: FontSize.sm, fontWeight: '600' },
+  pillTextActive: { color: Colors.background },
   chipGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
     paddingHorizontal: Spacing.md,
     gap: Spacing.sm,
     marginBottom: Spacing.lg,
   },
+  chipRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
   chip: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: Colors.surfaceHighlight,
     borderRadius: BorderRadius.sm,
     overflow: 'hidden',
-    width: '47%',
     height: 48,
   },
   chipArt: { width: 48, height: 48, backgroundColor: Colors.surface },

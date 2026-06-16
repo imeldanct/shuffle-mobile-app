@@ -21,8 +21,8 @@ import { RootStackParamList } from '../navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-type FilterType = 'Playlists' | 'Albums' | 'Artists';
-const FILTERS: FilterType[] = ['Playlists', 'Albums', 'Artists'];
+type FilterType = 'Playlists' | 'Podcasts' | 'Albums' | 'Artists' | 'Downloaded';
+const FILTERS: FilterType[] = ['Playlists', 'Podcasts', 'Albums', 'Artists', 'Downloaded'];
 
 let nextId = 1;
 
@@ -54,10 +54,22 @@ export default function LibraryScreen() {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.heading}>Your Library</Text>
-        <TouchableOpacity onPress={() => setModalVisible(true)}>
-          <Ionicons name="add" size={28} color={Colors.text} />
-        </TouchableOpacity>
+        <View style={styles.headerLeft}>
+          <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarLetter}>A</Text>
+            </View>
+          </TouchableOpacity>
+          <Text style={styles.heading}>Your Library</Text>
+        </View>
+        <View style={styles.headerRight}>
+          <TouchableOpacity style={styles.iconBtn}>
+            <Ionicons name="search" size={22} color={Colors.text} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.iconBtn} onPress={() => setModalVisible(true)}>
+            <Ionicons name="add" size={26} color={Colors.text} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Filter pills */}
@@ -72,6 +84,17 @@ export default function LibraryScreen() {
           </TouchableOpacity>
         ))}
       </ScrollView>
+
+      {/* Sort row */}
+      <View style={styles.sortRow}>
+        <TouchableOpacity style={styles.sortBtn}>
+          <Ionicons name="swap-vertical" size={16} color={Colors.text} />
+          <Text style={styles.sortText}>Recents</Text>
+        </TouchableOpacity>
+        <TouchableOpacity>
+          <Ionicons name="list" size={22} color={Colors.text} />
+        </TouchableOpacity>
+      </View>
 
       {/* Content */}
       {filter === 'Playlists' && (
@@ -153,8 +176,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
   },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  headerRight: { flexDirection: 'row', alignItems: 'center' },
+  avatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarLetter: { color: Colors.background, fontSize: FontSize.sm, fontWeight: '700' },
   heading: { color: Colors.text, fontSize: FontSize.xl, fontWeight: '700' },
-  filters: { paddingHorizontal: Spacing.md, gap: Spacing.sm, paddingBottom: Spacing.md },
+  iconBtn: { padding: Spacing.sm },
+  sortRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.md,
+    paddingBottom: Spacing.sm,
+  },
+  sortBtn: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
+  sortText: { color: Colors.text, fontSize: FontSize.sm, fontWeight: '500' },
+  filters: { paddingHorizontal: Spacing.md, gap: Spacing.sm, paddingBottom: Spacing.md, alignItems: 'flex-start' },
   pill: {
     paddingHorizontal: Spacing.md,
     paddingVertical: 6,

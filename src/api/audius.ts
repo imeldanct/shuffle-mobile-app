@@ -11,9 +11,7 @@ function mapTrack(raw: any): Track {
   const artworkUrl: string | null =
     raw.artwork?.['480x480'] ??
     raw.artwork?.['150x150'] ??
-    raw.cover_art_sizes
-      ? `${BASE}/tracks/${raw.id}/cover_art_sizes`
-      : null;
+    null;
 
   return {
     id: raw.id,
