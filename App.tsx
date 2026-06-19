@@ -3,7 +3,7 @@ import { BottomTabBar, createBottomTabNavigator } from '@react-navigation/bottom
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
-import { View, StyleSheet } from 'react-native';
+import { View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import MiniPlayer from './src/components/MiniPlayer';
@@ -18,7 +18,9 @@ import LikedSongsScreen from './src/screens/LikedSongsScreen';
 import QueueScreen from './src/screens/QueueScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 
+import { useEffect } from 'react';
 import { usePlayerStore } from './src/state/playerStore';
+import { useAuthStore } from './src/state/authStore';
 import { Colors } from './src/theme';
 import { RootStackParamList, TabParamList } from './src/navigation/types';
 
@@ -75,6 +77,9 @@ function Tabs() {
 }
 
 export default function App() {
+  const loadFromStorage = useAuthStore((s) => s.loadFromStorage);
+  useEffect(() => { loadFromStorage(); }, []);
+
   return (
     <SafeAreaProvider>
       <StatusBar style="light" />
@@ -102,5 +107,3 @@ export default function App() {
     </SafeAreaProvider>
   );
 }
-
-const styles = StyleSheet.create({});
