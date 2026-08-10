@@ -1,54 +1,151 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
-  Modal,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { getUserPlaylists, getUserSavedAudiobooks, getUserSavedShows, SpotifyAudiobook, SpotifyPlaylist, SpotifyShow } from '../api/spotify';
+import { useAuthStore } from '../state/authStore';
 import { usePlayerStore } from '../state/playerStore';
+import { useUIStore } from '../state/uiStore';
 import { Colors, BorderRadius, FontSize, Spacing } from '../theme';
-import { Playlist } from '../types';
 import { RootStackParamList } from '../navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-type FilterType = 'Playlists' | 'Podcasts' | 'Albums' | 'Artists' | 'Downloaded';
-const FILTERS: FilterType[] = ['Playlists', 'Podcasts', 'Albums', 'Artists', 'Downloaded'];
+type FilterType = 'Playlists' | 'Podcasts' | 'Albums' | 'Artists' | 'Audiobooks' | 'Downloaded';
+const FILTERS: FilterType[] = ['Playlists', 'Podcasts', 'Albums', 'Artists', 'Audiobooks', 'Downloaded'];
 
-let nextId = 1;
+// Spotify's DELETE /playlists/{id}/followers (the only endpoint that ever handled
+// deleting/unfollowing a playlist) was removed for Development Mode apps in Feb 2026 —
+// there is no way to really delete a playlist via the API anymore. This just hides it
+// from Shuffle's own list; it still exists on the real account. See README section 7.
+const HIDDEN_STORAGE_KEY = 'shuffle_hidden_playlists_v1';
 
 export default function LibraryScreen() {
   const navigation = useNavigation<Nav>();
-  const likedIds = usePlayerStore((s) => s.likedIds);
+  const likedCount = usePlayerStore((s) => Object.keys(s.likedTracks).length);
+  const { isAuthenticated, getValidToken } = useAuthStore();
   const [filter, setFilter] = useState<FilterType>('Playlists');
-  const [playlists, setPlaylists] = useState<Playlist[]>([]);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [newName, setNewName] = useState('');
+  const [spotifyPlaylists, setSpotifyPlaylists] = useState<SpotifyPlaylist[]>([]);
+  const [shows, setShows] = useState<SpotifyShow[]>([]);
+  const [showsLoading, setShowsLoading] = useState(true);
+  const [audiobooks, setAudiobooks] = useState<SpotifyAudiobook[]>([]);
+  const [audiobooksLoading, setAudiobooksLoading] = useState(true);
+  const [hiddenIds, setHiddenIds] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const openCreatePlaylistModal = useUIStore((s) => s.openCreatePlaylistModal);
+  const savedAlbums = usePlayerStore((s) => Object.values(s.savedAlbums));
+  const followedArtists = usePlayerStore((s) => Object.values(s.followedArtists));
   const insets = useSafeAreaInsets();
 
-  const createPlaylist = () => {
-    const name = newName.trim();
-    if (!name) return;
-    setPlaylists((prev) => [...prev, { id: String(nextId++), name, trackIds: [], createdAt: Date.now() }]);
-    setNewName('');
-    setModalVisible(false);
+  const loadSpotifyPlaylists = useCallback(async () => {
+    const token = await getValidToken();
+    if (!token) { setLoading(false); return; }
+    try {
+      setSpotifyPlaylists(await getUserPlaylists(token));
+    } finally {
+      setLoading(false);
+    }
+  }, [getValidToken]);
+
+  const loadShows = useCallback(async () => {
+    const token = await getValidToken();
+    if (!token) { setShowsLoading(false); return; }
+    try {
+      setShows(await getUserSavedShows(token));
+    } catch (e) {
+      console.error('getUserSavedShows error:', e);
+    } finally {
+      setShowsLoading(false);
+    }
+  }, [getValidToken]);
+
+  const loadAudiobooks = useCallback(async () => {
+    const token = await getValidToken();
+    if (!token) { setAudiobooksLoading(false); return; }
+    try {
+      setAudiobooks(await getUserSavedAudiobooks(token));
+    } catch (e) {
+      console.error('getUserSavedAudiobooks error:', e);
+    } finally {
+      setAudiobooksLoading(false);
+    }
+  }, [getValidToken]);
+
+  useEffect(() => {
+    AsyncStorage.getItem(HIDDEN_STORAGE_KEY).then((raw) => {
+      if (raw) setHiddenIds(JSON.parse(raw));
+    });
+  }, []);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      setLoading(true);
+      setShowsLoading(true);
+      setAudiobooksLoading(true);
+      loadSpotifyPlaylists();
+      loadShows();
+      loadAudiobooks();
+    } else {
+      setLoading(false);
+      setShowsLoading(false);
+      setAudiobooksLoading(false);
+    }
+  }, [isAuthenticated, loadSpotifyPlaylists, loadShows, loadAudiobooks]);
+
+  // Refresh whenever this tab regains focus — catches playlists created from
+  // the Create tab (or anywhere else) without needing a manual refresh.
+  useFocusEffect(
+    useCallback(() => {
+      if (isAuthenticated) loadSpotifyPlaylists();
+    }, [isAuthenticated, loadSpotifyPlaylists]),
+  );
+
+  const openCreateModal = () => {
+    // Real Spotify requires an account to create a playlist too — free or Premium,
+    // there's no anonymous playlist creation. Match that instead of faking one locally.
+    if (!isAuthenticated) {
+      Alert.alert('Log in required', 'Log in with Spotify to create a playlist.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Log In', onPress: () => navigation.navigate('Profile') },
+      ]);
+      return;
+    }
+    openCreatePlaylistModal();
   };
 
-  const deletePlaylist = (id: string) => {
-    Alert.alert('Delete playlist', 'Are you sure?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => setPlaylists((p) => p.filter((x) => x.id !== id)) },
-    ]);
+  const removeFromShuffle = (id: string) => {
+    Alert.alert(
+      'Remove from Shuffle',
+      "This only hides it in Shuffle — Spotify no longer lets apps delete a playlist, so it'll stay on your real account.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: () => {
+            const next = [...hiddenIds, id];
+            setHiddenIds(next);
+            AsyncStorage.setItem(HIDDEN_STORAGE_KEY, JSON.stringify(next));
+          },
+        },
+      ],
+    );
   };
+
+  const visiblePlaylists = spotifyPlaylists.filter((p) => !hiddenIds.includes(p.id));
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -66,7 +163,7 @@ export default function LibraryScreen() {
           <TouchableOpacity style={styles.iconBtn}>
             <Ionicons name="search" size={22} color={Colors.text} />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.iconBtn} onPress={() => setModalVisible(true)}>
+          <TouchableOpacity style={styles.iconBtn} onPress={openCreateModal}>
             <Ionicons name="add" size={26} color={Colors.text} />
           </TouchableOpacity>
         </View>
@@ -97,9 +194,13 @@ export default function LibraryScreen() {
       </View>
 
       {/* Content */}
-      {filter === 'Playlists' && (
+      {filter === 'Playlists' && loading && (
+        <ActivityIndicator color={Colors.primary} style={{ marginTop: Spacing.xl }} />
+      )}
+
+      {filter === 'Playlists' && !loading && (
         <FlatList
-          data={playlists}
+          data={isAuthenticated ? visiblePlaylists : []}
           keyExtractor={(p) => p.id}
           ListHeaderComponent={
             <TouchableOpacity style={styles.likedRow} onPress={() => navigation.navigate('LikedSongs')}>
@@ -107,62 +208,179 @@ export default function LibraryScreen() {
                 <Ionicons name="heart" size={22} color={Colors.text} />
               </View>
               <View>
-                <Text style={styles.itemName}>Liked Songs</Text>
-                <Text style={styles.itemSub}>{likedIds.size} songs</Text>
+                <Text style={styles.itemName}>Liked in Shuffle</Text>
+                <Text style={styles.itemSub}>{likedCount} songs</Text>
               </View>
             </TouchableOpacity>
           }
           renderItem={({ item }) => (
             <TouchableOpacity
               style={styles.itemRow}
-              onLongPress={() => deletePlaylist(item.id)}
               activeOpacity={0.7}
+              onPress={() => navigation.navigate('Playlist', { playlistId: item.id, playlistName: item.name })}
+              onLongPress={() => removeFromShuffle(item.id)}
             >
               <View style={styles.playlistIcon}>
                 <Ionicons name="musical-notes" size={20} color={Colors.textSecondary} />
               </View>
               <View>
                 <Text style={styles.itemName}>{item.name}</Text>
-                <Text style={styles.itemSub}>Playlist · {item.trackIds.length} songs</Text>
+                <Text style={styles.itemSub}>Playlist · {item.trackCount} songs</Text>
               </View>
             </TouchableOpacity>
           )}
           ListEmptyComponent={
-            <Text style={styles.empty}>Create a playlist to get started.</Text>
+            <Text style={styles.empty}>
+              {isAuthenticated
+                ? 'Create a playlist to get started.'
+                : 'Log in with Spotify to see and create playlists — just like the real app, that needs an account.'}
+            </Text>
           }
         />
       )}
 
-      {filter !== 'Playlists' && (
-        <View style={styles.center}>
-          <Text style={styles.empty}>No {filter.toLowerCase()} saved yet.</Text>
-        </View>
+      {filter === 'Podcasts' && showsLoading && (
+        <ActivityIndicator color={Colors.primary} style={{ marginTop: Spacing.xl }} />
       )}
 
-      {/* Create playlist modal */}
-      <Modal visible={modalVisible} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>New Playlist</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Give your playlist a name"
-              placeholderTextColor={Colors.textMuted}
-              value={newName}
-              onChangeText={setNewName}
-              autoFocus
-            />
-            <View style={styles.modalBtns}>
-              <TouchableOpacity onPress={() => { setModalVisible(false); setNewName(''); }}>
-                <Text style={styles.modalCancel}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={createPlaylist}>
-                <Text style={styles.modalCreate}>Create</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+      {filter === 'Podcasts' && !showsLoading && (
+        <FlatList
+          data={isAuthenticated ? shows : []}
+          keyExtractor={(s) => s.id}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={styles.itemRow}
+              activeOpacity={0.7}
+              onPress={() => navigation.navigate('Show', { showId: item.id, showName: item.name })}
+            >
+              {item.imageUrl ? (
+                <Image source={{ uri: item.imageUrl }} style={styles.showArt} />
+              ) : (
+                <View style={styles.playlistIcon}>
+                  <Ionicons name="mic" size={20} color={Colors.textSecondary} />
+                </View>
+              )}
+              <View>
+                <Text style={styles.itemName}>{item.name}</Text>
+                <Text style={styles.itemSub}>{item.publisher}</Text>
+              </View>
+            </TouchableOpacity>
+          )}
+          ListEmptyComponent={
+            <Text style={styles.empty}>
+              {isAuthenticated
+                ? 'Follow a show on Spotify and it will show up here.'
+                : 'Log in with Spotify to see your saved shows.'}
+            </Text>
+          }
+        />
+      )}
+
+      {filter === 'Albums' && (
+        <FlatList
+          data={isAuthenticated ? savedAlbums : []}
+          keyExtractor={(a) => a.id}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={styles.itemRow}
+              activeOpacity={0.7}
+              onPress={() => navigation.navigate('Album', { albumId: item.id })}
+            >
+              {item.imageUrl ? (
+                <Image source={{ uri: item.imageUrl }} style={styles.showArt} />
+              ) : (
+                <View style={styles.playlistIcon}>
+                  <Ionicons name="disc-outline" size={20} color={Colors.textSecondary} />
+                </View>
+              )}
+              <View>
+                <Text style={styles.itemName}>{item.name}</Text>
+                <Text style={styles.itemSub}>{item.artist}</Text>
+              </View>
+            </TouchableOpacity>
+          )}
+          ListEmptyComponent={
+            <Text style={styles.empty}>
+              {isAuthenticated
+                ? 'Save an album (the heart on an album page) and it will show up here.'
+                : 'Log in with Spotify to see your saved albums.'}
+            </Text>
+          }
+        />
+      )}
+
+      {filter === 'Artists' && (
+        <FlatList
+          data={isAuthenticated ? followedArtists : []}
+          keyExtractor={(a) => a.id}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={styles.itemRow}
+              activeOpacity={0.7}
+              onPress={() => navigation.navigate('Artist', { artistId: item.id, artistName: item.name })}
+            >
+              {item.imageUrl ? (
+                <Image source={{ uri: item.imageUrl }} style={styles.artistArt} />
+              ) : (
+                <View style={styles.playlistIcon}>
+                  <Ionicons name="person-outline" size={20} color={Colors.textSecondary} />
+                </View>
+              )}
+              <Text style={styles.itemName}>{item.name}</Text>
+            </TouchableOpacity>
+          )}
+          ListEmptyComponent={
+            <Text style={styles.empty}>
+              {isAuthenticated
+                ? 'Follow an artist and they will show up here.'
+                : 'Log in with Spotify to see who you follow.'}
+            </Text>
+          }
+        />
+      )}
+
+      {filter === 'Audiobooks' && audiobooksLoading && (
+        <ActivityIndicator color={Colors.primary} style={{ marginTop: Spacing.xl }} />
+      )}
+
+      {filter === 'Audiobooks' && !audiobooksLoading && (
+        <FlatList
+          data={isAuthenticated ? audiobooks : []}
+          keyExtractor={(a) => a.id}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={styles.itemRow}
+              activeOpacity={0.7}
+              onPress={() => navigation.navigate('Audiobook', { audiobookId: item.id, audiobookName: item.name })}
+            >
+              {item.imageUrl ? (
+                <Image source={{ uri: item.imageUrl }} style={styles.showArt} />
+              ) : (
+                <View style={styles.playlistIcon}>
+                  <Ionicons name="book-outline" size={20} color={Colors.textSecondary} />
+                </View>
+              )}
+              <View>
+                <Text style={styles.itemName}>{item.name}</Text>
+                <Text style={styles.itemSub}>{item.author}</Text>
+              </View>
+            </TouchableOpacity>
+          )}
+          ListEmptyComponent={
+            <Text style={styles.empty}>
+              {isAuthenticated
+                ? 'Save an audiobook on Spotify and it will show up here.'
+                : 'Log in with Spotify to see your saved audiobooks.'}
+            </Text>
+          }
+        />
+      )}
+
+      {filter === 'Downloaded' && (
+        <View style={styles.center}>
+          <Text style={styles.empty}>No downloads saved yet.</Text>
         </View>
-      </Modal>
+      )}
     </View>
   );
 }
@@ -238,23 +456,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  showArt: {
+    width: 52,
+    height: 52,
+    borderRadius: BorderRadius.sm,
+    backgroundColor: Colors.surfaceHighlight,
+  },
+  artistArt: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: Colors.surfaceHighlight,
+  },
   itemName: { color: Colors.text, fontSize: FontSize.md, fontWeight: '500' },
   itemSub: { color: Colors.textSecondary, fontSize: FontSize.sm, marginTop: 2 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   empty: { color: Colors.textMuted, fontSize: FontSize.sm, textAlign: 'center', marginTop: Spacing.xl, paddingHorizontal: Spacing.xl },
-  modalOverlay: { flex: 1, backgroundColor: Colors.overlay, justifyContent: 'center', alignItems: 'center' },
-  modalBox: { backgroundColor: Colors.surface, borderRadius: BorderRadius.lg, padding: Spacing.xl, width: '80%' },
-  modalTitle: { color: Colors.text, fontSize: FontSize.lg, fontWeight: '700', marginBottom: Spacing.md },
-  modalInput: {
-    backgroundColor: Colors.surfaceHighlight,
-    color: Colors.text,
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    fontSize: FontSize.md,
-    marginBottom: Spacing.lg,
-  },
-  modalBtns: { flexDirection: 'row', justifyContent: 'flex-end', gap: Spacing.lg },
-  modalCancel: { color: Colors.textSecondary, fontSize: FontSize.md },
-  modalCreate: { color: Colors.primary, fontSize: FontSize.md, fontWeight: '700' },
 });

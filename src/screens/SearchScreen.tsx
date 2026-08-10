@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   ScrollView,
   StyleSheet,
@@ -12,7 +13,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { searchTracks } from '../api/audius';
+import { searchSpotifyTracks } from '../api/spotify';
 import TrackItem from '../components/TrackItem';
+import { useAuthStore } from '../state/authStore';
 import { usePlayerStore } from '../state/playerStore';
 import { Colors, BorderRadius, FontSize, Spacing } from '../theme';
 import { Track } from '../types';
@@ -38,7 +41,8 @@ export default function SearchScreen() {
   const [loading, setLoading] = useState(false);
   const [active, setActive] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { playTrack, currentTrack } = usePlayerStore();
+  const { playTrack, playSpotifyTrack, currentTrack } = usePlayerStore();
+  const { isAuthenticated, getValidToken } = useAuthStore();
   const insets = useSafeAreaInsets();
 
   const handleChange = useCallback((text: string) => {
@@ -49,20 +53,33 @@ export default function SearchScreen() {
     debounceRef.current = setTimeout(async () => {
       setLoading(true);
       try {
-        setResults(await searchTracks(text));
+        if (isAuthenticated) {
+          // Real Spotify catalog — played via Connect remote control (Option A).
+          const token = await getValidToken();
+          setResults(token ? await searchSpotifyTracks(text, token) : await searchTracks(text));
+        } else {
+          // Logged out — fall back to Audius so search still works.
+          setResults(await searchTracks(text));
+        }
       } finally {
         setLoading(false);
       }
     }, 400);
-  }, []);
+  }, [isAuthenticated, getValidToken]);
 
   const handleGenre = useCallback((genre: string) => {
     handleChange(genre);
   }, [handleChange]);
 
-  const handlePress = useCallback((track: Track) => {
-    playTrack(track, results);
-  }, [results, playTrack]);
+  const handlePress = useCallback(async (track: Track) => {
+    if (track.source === 'spotify') {
+      await playSpotifyTrack(track, results);
+      const err = usePlayerStore.getState().remoteError;
+      if (err) Alert.alert('Playback unavailable', err);
+    } else {
+      playTrack(track, results);
+    }
+  }, [results, playTrack, playSpotifyTrack]);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>

@@ -3,6 +3,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Image,
   RefreshControl,
@@ -14,13 +15,15 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTrending } from '../api/audius';
+import { getArtistPopularTracks, getUserPlaylists, getUserTopTracks, SpotifyPlaylist } from '../api/spotify';
+import { useAuthStore } from '../state/authStore';
 import { usePlayerStore } from '../state/playerStore';
 import { Colors, FontSize, Spacing, BorderRadius } from '../theme';
 import { Track } from '../types';
 import { RootStackParamList } from '../navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
-type Filter = 'All' | 'Music' | 'Podcasts';
+type Filter = 'All' | 'Music';
 
 function TrackCard({ track, onPress }: { track: Track; onPress: () => void }) {
   return (
@@ -49,32 +52,90 @@ function RecentChip({ track, onPress }: { track: Track; onPress: () => void }) {
   );
 }
 
+function PlaylistCard({ playlist, onPress }: { playlist: SpotifyPlaylist; onPress: () => void }) {
+  return (
+    <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.7}>
+      {playlist.imageUrl ? (
+        <Image source={{ uri: playlist.imageUrl }} style={styles.cardArt} />
+      ) : (
+        <View style={[styles.cardArt, styles.cardArtFallback]} />
+      )}
+      <Text style={styles.cardTitle} numberOfLines={2}>{playlist.name}</Text>
+      <Text style={styles.cardSub} numberOfLines={1}>{playlist.trackCount} songs</Text>
+    </TouchableOpacity>
+  );
+}
+
 export default function HomeScreen() {
   const navigation = useNavigation<Nav>();
   const [trending, setTrending] = useState<Track[]>([]);
+  const [topTracks, setTopTracks] = useState<Track[]>([]);
+  const [playlists, setPlaylists] = useState<SpotifyPlaylist[]>([]);
+  const [shufflePicks, setShufflePicks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeFilter, setActiveFilter] = useState<Filter>('All');
-  const { playTrack } = usePlayerStore();
+  const { playTrack, playSpotifyTrack } = usePlayerStore();
+  const recentlyPlayed = usePlayerStore((s) => s.recentlyPlayed);
+  const { isAuthenticated, getValidToken } = useAuthStore();
   const insets = useSafeAreaInsets();
 
   const load = useCallback(async () => {
     try {
-      const tracks = await getTrending(40);
-      setTrending(tracks);
+      if (isAuthenticated) {
+        // Real Spotify data. Note: /browse/featured-playlists and /browse/new-releases
+        // are gone for Development Mode apps as of Feb 2026 — /me/top/tracks and
+        // /me/playlists are the real, working sources left. See README section 7.
+        const token = await getValidToken();
+        if (token) {
+          const [tracks, lists] = await Promise.all([
+            getUserTopTracks(token, 10),
+            getUserPlaylists(token, 10),
+          ]);
+          setTopTracks(tracks);
+          setPlaylists(lists);
+
+          // "Shuffle Picks" — our own homemade stand-in for Spotify's dead
+          // /recommendations and /browse/new-releases (see README section 11).
+          // Seeded from a couple of your own top-track artists, found via search.
+          const seedArtists = [...new Set(tracks.map((t) => t.artist))].slice(0, 3);
+          if (seedArtists.length > 0) {
+            const results = await Promise.all(
+              seedArtists.map((name) => getArtistPopularTracks(token, name, 5)),
+            );
+            const topTrackIds = new Set(tracks.map((t) => t.id));
+            const seen = new Set<string>();
+            const picks = results.flat().filter((t) => {
+              if (topTrackIds.has(t.id) || seen.has(t.id)) return false;
+              seen.add(t.id);
+              return true;
+            }).slice(0, 10);
+            setShufflePicks(picks);
+          }
+        }
+      } else {
+        const tracks = await getTrending(40);
+        setTrending(tracks);
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [isAuthenticated, getValidToken]);
 
   useEffect(() => { load(); }, [load]);
 
   const onRefresh = () => { setRefreshing(true); load(); };
 
-  const play = useCallback((track: Track) => {
-    playTrack(track, trending);
-  }, [trending, playTrack]);
+  const play = useCallback(async (track: Track, queue: Track[]) => {
+    if (track.source === 'spotify') {
+      await playSpotifyTrack(track, queue);
+      const err = usePlayerStore.getState().remoteError;
+      if (err) Alert.alert('Playback unavailable', err);
+    } else {
+      playTrack(track, queue);
+    }
+  }, [playTrack, playSpotifyTrack]);
 
   if (loading) {
     return (
@@ -84,8 +145,13 @@ export default function HomeScreen() {
     );
   }
 
-  const recentChips = trending.slice(0, 6);
-  const featured = trending.slice(0, 10);
+  // Logged in: Shuffle's own play history (Spotify doesn't give this back reliably —
+  // see README section 11) — falls back to top tracks until you've played anything.
+  // Logged out: Audius stand-in, sliced purely for visual variety.
+  const recentChips = isAuthenticated
+    ? (recentlyPlayed.length > 0 ? recentlyPlayed.slice(0, 6) : topTracks.slice(0, 6))
+    : trending.slice(0, 6);
+  const featured = isAuthenticated ? topTracks : trending.slice(0, 10);
   const newReleases = trending.slice(10, 20);
   const recommended = trending.slice(20, 30);
 
@@ -103,7 +169,7 @@ export default function HomeScreen() {
           </View>
         </TouchableOpacity>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pillsRow}>
-          {(['All', 'Music', 'Podcasts'] as const).map((f) => (
+          {(['All', 'Music'] as const).map((f) => (
             <TouchableOpacity
               key={f}
               style={[styles.pill, activeFilter === f && styles.pillActive]}
@@ -115,61 +181,103 @@ export default function HomeScreen() {
         </ScrollView>
       </View>
 
-      {/* Recently played chips — two per row, each flex: 1 so they fill evenly */}
+      {/* Quick-access chips — two per row, each flex: 1 so they fill evenly */}
       <View style={styles.chipGrid}>
-        {Array.from({ length: Math.ceil(recentChips.length / 2) }, (_, i) => (
-          <View key={i} style={styles.chipRow}>
-            {recentChips.slice(i * 2, i * 2 + 2).map((t) => (
-              <RecentChip key={t.id} track={t} onPress={() => play(t)} />
+            {Array.from({ length: Math.ceil(recentChips.length / 2) }, (_, i) => (
+              <View key={i} style={styles.chipRow}>
+                {recentChips.slice(i * 2, i * 2 + 2).map((t) => (
+                  <RecentChip key={t.id} track={t} onPress={() => play(t, recentChips)} />
+                ))}
+              </View>
             ))}
           </View>
-        ))}
-      </View>
 
-      {/* Featured section */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Trending Now</Text>
-        <FlatList
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          data={featured}
-          keyExtractor={(t) => t.id}
-          contentContainerStyle={{ paddingHorizontal: Spacing.md, gap: Spacing.md }}
-          renderItem={({ item }) => (
-            <TrackCard track={item} onPress={() => play(item)} />
-          )}
-        />
-      </View>
+          {/* Featured section — real Spotify top tracks when logged in, Audius trending otherwise */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>{isAuthenticated ? 'Your Top Tracks' : 'Trending Now'}</Text>
+            <FlatList
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              data={featured}
+              keyExtractor={(t) => t.id}
+              contentContainerStyle={{ paddingHorizontal: Spacing.md, gap: Spacing.md }}
+              renderItem={({ item }) => (
+                <TrackCard track={item} onPress={() => play(item, featured)} />
+              )}
+            />
+          </View>
 
-      {/* New releases */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>New Releases</Text>
-        <FlatList
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          data={newReleases}
-          keyExtractor={(t) => t.id}
-          contentContainerStyle={{ paddingHorizontal: Spacing.md, gap: Spacing.md }}
-          renderItem={({ item }) => (
-            <TrackCard track={item} onPress={() => play(item)} />
-          )}
-        />
-      </View>
+          {isAuthenticated ? (
+            <>
+              {/* Your real Spotify playlists — /browse endpoints are gone, but /me/playlists still works */}
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Your Playlists</Text>
+                <FlatList
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  data={playlists}
+                  keyExtractor={(p) => p.id}
+                  contentContainerStyle={{ paddingHorizontal: Spacing.md, gap: Spacing.md }}
+                  renderItem={({ item }) => (
+                    <PlaylistCard
+                      playlist={item}
+                      onPress={() => navigation.navigate('Playlist', { playlistId: item.id, playlistName: item.name })}
+                    />
+                  )}
+                />
+              </View>
 
-      {/* Recommended */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Recommended For You</Text>
-        <FlatList
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          data={recommended}
-          keyExtractor={(t) => t.id}
-          contentContainerStyle={{ paddingHorizontal: Spacing.md, gap: Spacing.md }}
-          renderItem={({ item }) => (
-            <TrackCard track={item} onPress={() => play(item)} />
+              {shufflePicks.length > 0 && (
+                /* Shuffle's own guess, not Spotify's — see README section 11 for why
+                   "New Releases"/"Recommended For You" can't be the real thing anymore. */
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Shuffle Picks</Text>
+                  <Text style={styles.sectionSub}>Our own guess, based on artists you already listen to — not Spotify's recommendations.</Text>
+                  <FlatList
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    data={shufflePicks}
+                    keyExtractor={(t) => t.id}
+                    contentContainerStyle={{ paddingHorizontal: Spacing.md, gap: Spacing.md }}
+                    renderItem={({ item }) => (
+                      <TrackCard track={item} onPress={() => play(item, shufflePicks)} />
+                    )}
+                  />
+                </View>
+              )}
+            </>
+          ) : (
+            <>
+              {/* New releases — Audius stand-in only; Spotify's own /browse/new-releases is gone (Feb 2026) */}
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>New Releases</Text>
+                <FlatList
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  data={newReleases}
+                  keyExtractor={(t) => t.id}
+                  contentContainerStyle={{ paddingHorizontal: Spacing.md, gap: Spacing.md }}
+                  renderItem={({ item }) => (
+                    <TrackCard track={item} onPress={() => play(item, newReleases)} />
+                  )}
+                />
+              </View>
+
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Recommended For You</Text>
+                <FlatList
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  data={recommended}
+                  keyExtractor={(t) => t.id}
+                  contentContainerStyle={{ paddingHorizontal: Spacing.md, gap: Spacing.md }}
+                  renderItem={({ item }) => (
+                    <TrackCard track={item} onPress={() => play(item, recommended)} />
+                  )}
+                />
+              </View>
+            </>
           )}
-        />
-      </View>
     </ScrollView>
   );
 }
@@ -235,6 +343,13 @@ const styles = StyleSheet.create({
     fontSize: FontSize.lg,
     fontWeight: '700',
     paddingHorizontal: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  sectionSub: {
+    color: Colors.textMuted,
+    fontSize: FontSize.xs,
+    paddingHorizontal: Spacing.md,
+    marginTop: -Spacing.sm,
     marginBottom: Spacing.md,
   },
   card: { width: 140 },

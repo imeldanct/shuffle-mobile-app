@@ -1,11 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
+  FlatList,
   Image,
   ImageBackground,
+  Modal,
+  Share,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -14,7 +18,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RootStackParamList } from '../navigation/types';
 import { usePlayerStore } from '../state/playerStore';
-import { Colors, FontSize, Spacing } from '../theme';
+import { useUIStore } from '../state/uiStore';
+import { Colors, BorderRadius, FontSize, Spacing } from '../theme';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -29,14 +34,57 @@ export default function NowPlayingScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const trackWidthRef = useRef(0);
+  const [deviceModalVisible, setDeviceModalVisible] = useState(false);
+  const openTrackActions = useUIStore((s) => s.openTrackActions);
+
+  const volumeWidthRef = useRef(0);
 
   const {
-    currentTrack, isPlaying, isLoading, positionMs, durationMs,
+    mode, currentTrack, isPlaying, isLoading, positionMs, durationMs,
     repeat, isShuffle, togglePlay, seekTo, skipNext, skipPrev,
     setRepeat, toggleShuffle, toggleLike, isLiked,
+    availableDevices, remoteDeviceId, refreshDevices, switchDevice,
+    volume, setVolume,
   } = usePlayerStore();
 
   const liked = currentTrack ? isLiked(currentTrack.id) : false;
+
+  const openDevicePicker = useCallback(async () => {
+    if (mode !== 'remote') {
+      Alert.alert('No devices to show', 'Device switching is only available while playing through Spotify Connect.');
+      return;
+    }
+    await refreshDevices();
+    setDeviceModalVisible(true);
+  }, [mode, refreshDevices]);
+
+  const handleSelectDevice = useCallback(async (deviceId: string) => {
+    setDeviceModalVisible(false);
+    await switchDevice(deviceId);
+    const err = usePlayerStore.getState().remoteError;
+    if (err) Alert.alert('Playback unavailable', err);
+  }, [switchDevice]);
+
+  const handleVolumeDrag = useCallback((e: any) => {
+    if (volumeWidthRef.current > 0) {
+      const ratio = Math.min(1, Math.max(0, e.nativeEvent.locationX / volumeWidthRef.current));
+      setVolume(ratio * 100);
+    }
+  }, [setVolume]);
+
+  const handleShare = useCallback(async () => {
+    if (!currentTrack) return;
+    const url = currentTrack.spotifyUri
+      ? `https://open.spotify.com/track/${currentTrack.spotifyUri.split(':').pop()}`
+      : null;
+    try {
+      await Share.share({
+        message: url ? `${currentTrack.title} — ${currentTrack.artist}\n${url}` : `${currentTrack.title} — ${currentTrack.artist}`,
+      });
+    } catch (e) {
+      console.error('Share error:', e);
+    }
+  }, [currentTrack]);
 
   const cycleRepeat = useCallback(() => {
     if (repeat === 'off') setRepeat('all');
@@ -70,8 +118,10 @@ export default function NowPlayingScreen() {
         <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
           <Ionicons name="chevron-down" size={28} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.context} numberOfLines={1}>Shuffle</Text>
-        <TouchableOpacity hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+        <TouchableOpacity
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          onPress={() => currentTrack && openTrackActions(currentTrack)}
+        >
           <Ionicons name="ellipsis-horizontal" size={24} color={Colors.text} />
         </TouchableOpacity>
       </View>
@@ -89,10 +139,21 @@ export default function NowPlayingScreen() {
       <View style={styles.infoRow}>
         <View style={styles.infoText}>
           <Text style={styles.title} numberOfLines={1}>{currentTrack.title}</Text>
-          <Text style={styles.artist} numberOfLines={1}>{currentTrack.artist}</Text>
+          {currentTrack.source === 'spotify' && currentTrack.artistId ? (
+            <TouchableOpacity
+              onPress={() => navigation.navigate('Artist', {
+                artistId: currentTrack.artistId,
+                artistName: currentTrack.artist,
+              })}
+            >
+              <Text style={styles.artist} numberOfLines={1}>{currentTrack.artist}</Text>
+            </TouchableOpacity>
+          ) : (
+            <Text style={styles.artist} numberOfLines={1}>{currentTrack.artist}</Text>
+          )}
         </View>
         <TouchableOpacity
-          onPress={() => toggleLike(currentTrack.id)}
+          onPress={() => toggleLike(currentTrack)}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         >
           <Ionicons
@@ -151,10 +212,10 @@ export default function NowPlayingScreen() {
 
       {/* Utility row */}
       <View style={styles.utilRow}>
-        <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+        <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={openDevicePicker}>
           <Ionicons name="phone-portrait-outline" size={22} color={Colors.textSecondary} />
         </TouchableOpacity>
-        <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+        <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={handleShare}>
           <Ionicons name="share-outline" size={22} color={Colors.textSecondary} />
         </TouchableOpacity>
         <TouchableOpacity
@@ -167,15 +228,70 @@ export default function NowPlayingScreen() {
     </View>
   );
 
+  const deviceModal = (
+    <Modal visible={deviceModalVisible} transparent animationType="fade" onRequestClose={() => setDeviceModalVisible(false)}>
+      <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setDeviceModalVisible(false)}>
+        <View style={styles.modalBox}>
+          <Text style={styles.modalTitle}>Connect to a device</Text>
+
+          <View style={styles.volumeRow}>
+            <Ionicons name="volume-low-outline" size={18} color={Colors.textSecondary} />
+            <View
+              style={styles.volumeTrack}
+              onLayout={(e) => { volumeWidthRef.current = e.nativeEvent.layout.width; }}
+              onStartShouldSetResponder={() => true}
+              onResponderGrant={handleVolumeDrag}
+              onResponderMove={handleVolumeDrag}
+            >
+              <View style={styles.volumeTrackBg} />
+              <View style={[styles.volumeFill, { width: `${volume}%` as any }]} />
+            </View>
+            <Ionicons name="volume-high-outline" size={18} color={Colors.textSecondary} />
+          </View>
+
+          {availableDevices.length === 0 ? (
+            <Text style={styles.modalEmpty}>No devices found. Open Spotify somewhere first.</Text>
+          ) : (
+            <FlatList
+              data={availableDevices}
+              keyExtractor={(d) => d.id}
+              renderItem={({ item }) => (
+                <TouchableOpacity style={styles.deviceRow} onPress={() => handleSelectDevice(item.id)}>
+                  <Ionicons
+                    name={item.type === 'Computer' ? 'desktop-outline' : item.type === 'Speaker' ? 'volume-high-outline' : 'phone-portrait-outline'}
+                    size={22}
+                    color={Colors.text}
+                  />
+                  <Text style={styles.deviceName} numberOfLines={1}>{item.name}</Text>
+                  {item.id === remoteDeviceId && (
+                    <Ionicons name="checkmark-circle" size={20} color={Colors.primary} />
+                  )}
+                </TouchableOpacity>
+              )}
+            />
+          )}
+        </View>
+      </TouchableOpacity>
+    </Modal>
+  );
+
   if (currentTrack.artworkUrl) {
     return (
-      <ImageBackground source={{ uri: currentTrack.artworkUrl }} style={styles.bg} blurRadius={80}>
-        <View style={styles.overlay}>{content}</View>
-      </ImageBackground>
+      <>
+        <ImageBackground source={{ uri: currentTrack.artworkUrl }} style={styles.bg} blurRadius={80}>
+          <View style={styles.overlay}>{content}</View>
+        </ImageBackground>
+        {deviceModal}
+      </>
     );
   }
 
-  return <View style={[styles.bg, { backgroundColor: '#0a0a0a' }]}>{content}</View>;
+  return (
+    <>
+      <View style={[styles.bg, { backgroundColor: '#0a0a0a' }]}>{content}</View>
+      {deviceModal}
+    </>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -192,8 +308,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingBottom: Spacing.md,
   },
-  context: { color: Colors.text, fontSize: FontSize.sm, fontWeight: '600', flex: 1, textAlign: 'center' },
-
   artworkWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: Spacing.md },
   artwork: { width: '100%', aspectRatio: 1, borderRadius: 8 },
   artworkFallback: { backgroundColor: Colors.surfaceHighlight },
@@ -240,4 +354,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: Spacing.md,
   },
+
+  modalOverlay: { flex: 1, backgroundColor: Colors.overlay, justifyContent: 'flex-end' },
+  modalBox: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: BorderRadius.lg,
+    borderTopRightRadius: BorderRadius.lg,
+    padding: Spacing.xl,
+    maxHeight: '60%',
+  },
+  modalTitle: { color: Colors.text, fontSize: FontSize.lg, fontWeight: '700', marginBottom: Spacing.md },
+  volumeRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.lg },
+  volumeTrack: { flex: 1, height: 24, justifyContent: 'center' },
+  volumeTrackBg: { height: 4, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 2 },
+  volumeFill: { position: 'absolute', height: 4, backgroundColor: Colors.primary, borderRadius: 2 },
+  modalEmpty: { color: Colors.textSecondary, fontSize: FontSize.sm },
+  deviceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  deviceName: { flex: 1, color: Colors.text, fontSize: FontSize.md },
 });

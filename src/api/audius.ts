@@ -23,6 +23,7 @@ function mapTrack(raw: any): Track {
     streamUrl: `${BASE}/tracks/${raw.id}/stream?app_name=${APP}`,
     genre: raw.genre ?? null,
     playCount: raw.play_count ?? 0,
+    source: 'audius',
   };
 }
 

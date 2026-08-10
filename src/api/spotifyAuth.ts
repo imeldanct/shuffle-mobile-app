@@ -7,9 +7,15 @@ export const SPOTIFY_SCOPES = [
   'user-library-modify',
   'playlist-read-private',
   'playlist-read-collaborative',
+  'playlist-modify-public',
+  'playlist-modify-private',
   'user-top-read',
   'user-read-recently-played',
-  'streaming',
+  'user-modify-playback-state',
+  'user-read-playback-state',
+  'user-read-currently-playing',
+  'user-follow-read',
+  'user-follow-modify',
 ];
 
 // Static discovery — avoids an extra network round-trip on every auth attempt

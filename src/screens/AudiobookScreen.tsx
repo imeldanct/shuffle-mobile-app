@@ -13,7 +13,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getAlbum, isInLibrary, SpotifyAlbum } from '../api/spotify';
+import { getAudiobook, getAudiobookChapters, SpotifyAudiobook } from '../api/spotify';
 import TrackItem from '../components/TrackItem';
 import { useAuthStore } from '../state/authStore';
 import { usePlayerStore } from '../state/playerStore';
@@ -22,18 +22,17 @@ import { RootStackParamList } from '../navigation/types';
 import { Track } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
-type Route = RouteProp<RootStackParamList, 'Album'>;
+type Route = RouteProp<RootStackParamList, 'Audiobook'>;
 
-export default function AlbumScreen() {
+export default function AudiobookScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
   const insets = useSafeAreaInsets();
-  const [album, setAlbum] = useState<SpotifyAlbum | null>(null);
-  const [tracks, setTracks] = useState<Track[]>([]);
+  const [audiobook, setAudiobook] = useState<SpotifyAudiobook | null>(null);
+  const [chapters, setChapters] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);
-  const [realSaved, setRealSaved] = useState<boolean | null>(null);
   const { getValidToken } = useAuthStore();
-  const { currentTrack, playSpotifyTrack, setSavedAlbum, isAlbumSaved } = usePlayerStore();
+  const { currentTrack, playSpotifyTrack } = usePlayerStore();
 
   useEffect(() => {
     let cancelled = false;
@@ -41,40 +40,26 @@ export default function AlbumScreen() {
       const token = await getValidToken();
       if (!token) { setLoading(false); return; }
       try {
-        const result = await getAlbum(token, route.params.albumId);
+        const bookData = await getAudiobook(token, route.params.audiobookId);
+        const bookChapters = await getAudiobookChapters(token, route.params.audiobookId, bookData.name);
         if (!cancelled) {
-          setAlbum(result.album);
-          setTracks(result.tracks);
+          setAudiobook(bookData);
+          setChapters(bookChapters);
         }
-        // Real check, same reasoning as Artist's isFollowingArtist — catches an
-        // album saved via the real Spotify app before Shuffle ever knew about it.
-        const isSaved = await isInLibrary(token, `spotify:album:${route.params.albumId}`).catch(() => null);
-        if (!cancelled) setRealSaved(isSaved);
       } catch (e) {
-        console.error('AlbumScreen load error:', e);
+        console.error('AudiobookScreen load error:', e);
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [route.params.albumId, getValidToken]);
+  }, [route.params.audiobookId, getValidToken]);
 
-  const handlePress = useCallback(async (track: Track) => {
-    await playSpotifyTrack(track, tracks);
+  const handlePress = useCallback(async (chapter: Track) => {
+    await playSpotifyTrack(chapter, chapters);
     const err = usePlayerStore.getState().remoteError;
     if (err) Alert.alert('Playback unavailable', err);
-  }, [tracks, playSpotifyTrack]);
-
-  const playAll = useCallback(() => {
-    if (tracks.length) handlePress(tracks[0]);
-  }, [tracks, handlePress]);
-
-  const saved = realSaved !== null ? realSaved : (album ? isAlbumSaved(album.id) : false);
-  const handleToggleSave = useCallback(() => {
-    if (!album) return;
-    setRealSaved(!saved);
-    setSavedAlbum(album, !saved);
-  }, [album, saved, setSavedAlbum]);
+  }, [chapters, playSpotifyTrack]);
 
   if (loading) {
     return (
@@ -91,34 +76,21 @@ export default function AlbumScreen() {
       </TouchableOpacity>
 
       <View style={styles.header}>
-        {album?.imageUrl ? (
-          <Image source={{ uri: album.imageUrl }} style={styles.art} />
+        {audiobook?.imageUrl ? (
+          <Image source={{ uri: audiobook.imageUrl }} style={styles.art} />
         ) : (
           <View style={[styles.art, styles.artFallback]} />
         )}
-        <Text style={styles.title} numberOfLines={2}>{album?.name ?? 'Album'}</Text>
-        <Text style={styles.sub}>{album?.artist}</Text>
-        <Text style={styles.subMuted}>
-          {album?.releaseDate?.slice(0, 4)} · {tracks.length} songs
-        </Text>
+        <Text style={styles.title} numberOfLines={2}>{audiobook?.name ?? route.params.audiobookName ?? 'Audiobook'}</Text>
+        <Text style={styles.sub}>{audiobook?.author}</Text>
+        <Text style={styles.subMuted}>{chapters.length} chapters</Text>
       </View>
 
-      <View style={styles.actionsRow}>
-        <TouchableOpacity onPress={handleToggleSave} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-          <Ionicons name={saved ? 'heart' : 'heart-outline'} size={26} color={saved ? Colors.primary : Colors.text} />
-        </TouchableOpacity>
-        {tracks.length > 0 && (
-          <TouchableOpacity style={styles.playBtn} onPress={playAll} activeOpacity={0.8}>
-            <Ionicons name="play" size={22} color={Colors.background} />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {tracks.length === 0 ? (
-        <Text style={styles.empty}>This album has no tracks.</Text>
+      {chapters.length === 0 ? (
+        <Text style={styles.empty}>This audiobook has no chapters.</Text>
       ) : (
         <FlatList
-          data={tracks}
+          data={chapters}
           keyExtractor={(t) => t.id}
           renderItem={({ item }) => (
             <TrackItem track={item} onPress={handlePress} isActive={currentTrack?.id === item.id} />
@@ -136,26 +108,11 @@ const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background },
   back: { padding: Spacing.md },
   header: { alignItems: 'center', paddingHorizontal: Spacing.xl, paddingBottom: Spacing.md, gap: 4 },
-  art: { width: 180, height: 180, borderRadius: BorderRadius.md, marginBottom: Spacing.md, backgroundColor: Colors.surfaceHighlight },
+  art: { width: 160, height: 160, borderRadius: BorderRadius.md, marginBottom: Spacing.md, backgroundColor: Colors.surfaceHighlight },
   artFallback: { backgroundColor: Colors.surfaceHighlight },
   title: { color: Colors.text, fontSize: FontSize.xl, fontWeight: '700', textAlign: 'center' },
   sub: { color: Colors.textSecondary, fontSize: FontSize.md },
   subMuted: { color: Colors.textMuted, fontSize: FontSize.sm },
-  actionsRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: Spacing.xl,
-    marginBottom: Spacing.md,
-  },
-  playBtn: {
-    width: 52,
-    height: 52,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
   empty: { color: Colors.textMuted, fontSize: FontSize.sm, textAlign: 'center', marginTop: Spacing.xl },
   separator: { height: 1, backgroundColor: Colors.border, marginLeft: 84 },
 });
