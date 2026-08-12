@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -46,8 +46,14 @@ export default function LibraryScreen() {
   const [hiddenIds, setHiddenIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const openCreatePlaylistModal = useUIStore((s) => s.openCreatePlaylistModal);
-  const savedAlbums = usePlayerStore((s) => Object.values(s.savedAlbums));
-  const followedArtists = usePlayerStore((s) => Object.values(s.followedArtists));
+  // Select the raw records (stable reference between renders unless actually
+  // changed) and derive arrays in the render body — Object.values() *inside*
+  // a selector returns a new array every render, which breaks Zustand's
+  // snapshot comparison and causes an infinite re-render loop.
+  const savedAlbumsMap = usePlayerStore((s) => s.savedAlbums);
+  const followedArtistsMap = usePlayerStore((s) => s.followedArtists);
+  const savedAlbums = useMemo(() => Object.values(savedAlbumsMap), [savedAlbumsMap]);
+  const followedArtists = useMemo(() => Object.values(followedArtistsMap), [followedArtistsMap]);
   const insets = useSafeAreaInsets();
 
   const loadSpotifyPlaylists = useCallback(async () => {
